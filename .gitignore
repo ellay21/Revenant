@@ -1,0 +1,8 @@
+/build/
+/out/
+/.cache/
+compile_commands.json
+CMakeUserPresets.json
+/bench/results/raw/
+*.swp
+.DS_Store

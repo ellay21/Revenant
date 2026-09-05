@@ -1,0 +1,18 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  concurrency-*,
+  performance-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  readability-implicit-bool-conversion,
+  cppcoreguidelines-pro-type-member-init
+WarningsAsErrors: '*'
+# Project headers only; fetched dependencies live under _deps/<name>-src/.
+HeaderFilterRegex: '/(include/revenant|src|tests)/'
+FormatStyle: file
+CheckOptions:
+  - key: readability-implicit-bool-conversion.AllowPointerConditions
+    value: true

@@ -1,0 +1,22 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+ColumnLimit: 100
+DerivePointerAlignment: false
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+IncludeBlocks: Regroup
+# Most specific first: the component's own library, then third-party, then the system.
+IncludeCategories:
+  - Regex: '^<revenant/'
+    Priority: 1
+  - Regex: '^<gtest/'
+    Priority: 2
+  - Regex: '^<(sys/)?[a-z_]+\.h>$'
+    Priority: 3
+  - Regex: '^<[a-z_]+>$'
+    Priority: 4
+  - Regex: '^"'
+    Priority: 5

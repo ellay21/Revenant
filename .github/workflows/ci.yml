@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - run: scripts/format.sh --check
+
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build clang-tidy-18
+      - run: cmake --preset dev
+      - run: scripts/lint.sh build/dev
+
+  build-test:
+    name: build-test (${{ matrix.os }}, ${{ matrix.cxx }}, ${{ matrix.preset }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04]
+        cxx: [g++-13, g++-14, clang++-18]
+        preset: [dev, release]
+        include:
+          # arm64's weaker memory model exposes ordering bugs that x86-64 hides.
+          - { os: ubuntu-24.04-arm, cxx: g++-13, preset: dev }
+    env:
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build cmake
+      - run: cmake --preset ${{ matrix.preset }}
+      - run: cmake --build --preset ${{ matrix.preset }}
+      - run: ctest --preset ${{ matrix.preset }}
+      - name: No shared-memory segments left behind
+        run: "! ls /dev/shm | grep '^revenant\\.'"
+
+  sanitizers:
+    name: sanitizers (${{ matrix.preset }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [asan, tsan]
+    env:
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+      - name: Lower ASLR entropy (TSan cannot map its shadow memory otherwise)
+        if: matrix.preset == 'tsan'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - run: cmake --preset ${{ matrix.preset }}
+      - run: cmake --build --preset ${{ matrix.preset }}
+      - run: ctest --preset ${{ matrix.preset }}
+      - name: No shared-memory segments left behind
+        run: "! ls /dev/shm | grep '^revenant\\.'"

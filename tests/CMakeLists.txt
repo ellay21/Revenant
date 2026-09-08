@@ -19,6 +19,6 @@ function(revenant_add_test_suite target label)
   gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST PROPERTIES LABELS ${label})
 endfunction()
 
-revenant_add_test_suite(revenant_unit_tests unit unit/test_config.cpp)
+revenant_add_test_suite(revenant_unit_tests unit unit/test_config.cpp unit/test_ring.cpp)
 target_compile_definitions(revenant_unit_tests
                            PRIVATE REVENANT_TEST_EXPECTED_VERSION="${PROJECT_VERSION}")

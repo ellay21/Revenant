@@ -25,6 +25,7 @@ revenant_add_test_suite(
   unit/test_config.cpp
   unit/test_errors.cpp
   unit/test_layout.cpp
-  unit/test_ring.cpp)
+  unit/test_ring.cpp
+  unit/test_validate_header.cpp)
 target_compile_definitions(revenant_unit_tests
                            PRIVATE REVENANT_TEST_EXPECTED_VERSION="${PROJECT_VERSION}")

@@ -58,6 +58,38 @@ Each field owns its own line, so a store to one never invalidates the line holdi
 - **A slot's `seq_word` only increases:** `0 < 2s − 1 < 2s < 2(s + slot_count) − 1`. Comparing a slot's word with the one a reader expects therefore tells "not written yet" apart from "overwritten by a later lap".
 - **Payload capacity** is `slot_size − 16`: 48 to 4080 bytes.
 
+## Initialisation
+
+Only the lease holder initialises a segment, and only while `magic == 0` (a fresh file, or one whose creator died mid-initialisation). It zeroes every byte after `magic`, writes the header fields, and then stores `magic = kMagic` with **release** ordering. A reader that loads `magic` with **acquire** ordering and sees `kMagic` therefore also sees the complete header and a zeroed control block and ring.
+
+`magic` itself is never touched by a plain store, because subscribers may be polling it during initialisation.
+
+## `layout_hash`
+
+FNV-1a-64 over these 64-bit values (each hashed as 8 little-endian bytes), in order:
+
+1. `kWireVersion`, `kWireLine`, `kSlotsOffset`
+2. `sizeof` and every field offset of `SegmentHeader`, then `ControlBlock`, then `SlotHeader`, then `kSlotHeaderSize`
+3. `slot_size`, `slot_count`
+
+The publisher stores the hash at initialisation. A reader recomputes it from the header's geometry and **its own compiled layout**. If two builds disagree about any layout detail, they compute different hashes, and the attach fails with `layout_mismatch` instead of misreading bytes. For `slot_size = 256, slot_count = 4096` the v1 value is `0xaaf2be61fbe731e0`, and a test pins it.
+
+## Validation order
+
+`validate_header` runs over the whole mapping, so the span size is the file size. The first failing check decides the error:
+
+| # | Check | Error |
+|---|---|---|
+| 1 | Size < 256 | `segment_incomplete` (retry: the creator may still be initialising) |
+| 2 | `magic == 0` | `segment_incomplete` (retry; a new publisher re-initialises) |
+| 3 | `magic != kMagic` | `bad_magic` |
+| 4 | `wire_version != 1` | `version_mismatch` |
+| 5 | Geometry not a power of two or out of range, or any reserved byte non-zero | `segment_corrupt` |
+| 6 | Size ≠ `256 + slot_count × slot_size` | `segment_corrupt` |
+| 7 | `layout_hash` ≠ the recomputed hash | `layout_mismatch` |
+
+`created_unix_ns` is diagnostic and never checked. Validation accepts any byte content safely: a seeded test applies 10⁵ random header corruptions and truncations under AddressSanitizer, and accepts exactly the images whose checked bytes match a valid header.
+
 ## Versioning
 
 - The wire version changes only when the layout changes incompatibly. There is no partial compatibility: a v1 reader refuses any other version.

@@ -8,6 +8,16 @@
 
 namespace {
 
+// In release builds this only compiles warning-free if the macro still names its operand.
+int asserted_only(int value) {
+  REVENANT_ASSERT(value > 0);
+  return 1;
+}
+
+TEST(Config, ParameterUsedOnlyInAnAssertionIsNotUnused) {
+  EXPECT_EQ(asserted_only(1), 1);
+}
+
 TEST(Config, VersionMatchesProjectVersion) {
   EXPECT_EQ(revenant::version(), std::string_view{REVENANT_TEST_EXPECTED_VERSION});
 }

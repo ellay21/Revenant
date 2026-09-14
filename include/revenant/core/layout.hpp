@@ -211,6 +211,16 @@ inline constexpr std::uint64_t kFnvPrime = 0x0000'0100'0000'01b3;
   return *reinterpret_cast<const ControlBlock*>(segment + kControlOffset);
 }
 
+/// Start of the slot holding `seq`. Narrow contract: `g` is the segment's (valid) geometry.
+[[nodiscard]] inline std::byte* slot_at(std::byte* segment, RingGeometry g,
+                                        std::uint64_t seq) noexcept {
+  return segment + kSlotsOffset + g.slot_offset(seq);
+}
+[[nodiscard]] inline const std::byte* slot_at(const std::byte* segment, RingGeometry g,
+                                              std::uint64_t seq) noexcept {
+  return segment + kSlotsOffset + g.slot_offset(seq);
+}
+
 /// Writes a fresh segment: everything after `magic` is zeroed and the header filled in, then
 /// `magic` is stored last with release ordering, publishing the rest to any acquiring reader.
 /// `magic` itself is never written with a plain store, because a subscriber may be polling it.

@@ -1,17 +1,15 @@
 #pragma once
 
 #include <revenant/config.hpp>
+#include <revenant/core/atomics.hpp>
 #include <revenant/core/layout.hpp>
 
-#include <algorithm>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <span>
 
 // Per-slot seqlock: the protocol from Boehm, "Can Seqlocks Get Along with Programming Language
-// Memory Models?" (2012). Labels W1-W4 and R1-R4 match the protocol description in the docs.
+// Memory Models?" (2012). Labels W1-W4 and R1-R4 match docs/design.md.
 // Meta and payload are relaxed atomic words: a writer may be storing them while a reader loads
 // them, and plain accesses would be a data race (undefined behaviour). The reader therefore
 // copies out and re-validates; it never hands out a pointer into the slot.
@@ -36,13 +34,14 @@ struct SlotRead {
 
 namespace detail {
 
-[[nodiscard]] inline std::uint64_t& word_at(std::byte* slot, std::size_t offset) noexcept {
-  return *reinterpret_cast<std::uint64_t*>(slot + offset);
+[[nodiscard]] inline SlotHeader& slot_header(std::byte* slot) noexcept {
+  REVENANT_ASSERT(reinterpret_cast<std::uintptr_t>(slot) % alignof(SlotHeader) == 0);
+  return *reinterpret_cast<SlotHeader*>(slot);
 }
 
-// Readers only perform lock-free atomic loads through this reference, and those never write.
-[[nodiscard]] inline std::uint64_t& word_at(const std::byte* slot, std::size_t offset) noexcept {
-  return const_cast<std::uint64_t&>(*reinterpret_cast<const std::uint64_t*>(slot + offset));
+[[nodiscard]] inline const SlotHeader& slot_header(const std::byte* slot) noexcept {
+  REVENANT_ASSERT(reinterpret_cast<std::uintptr_t>(slot) % alignof(SlotHeader) == 0);
+  return *reinterpret_cast<const SlotHeader*>(slot);
 }
 
 }  // namespace detail
@@ -53,23 +52,14 @@ namespace detail {
 inline void write_slot(std::byte* slot, std::uint32_t capacity, std::uint64_t seq,
                        std::uint32_t epoch, std::span<const std::byte> payload) noexcept {
   REVENANT_ASSERT(payload.size() <= capacity);
-  REVENANT_ASSERT(reinterpret_cast<std::uintptr_t>(slot) % alignof(std::uint64_t) == 0);
-
-  std::atomic_ref<std::uint64_t> seq_word{detail::word_at(slot, offsetof(SlotHeader, seq_word))};
-  seq_word.store(writing_word(seq), std::memory_order_relaxed);  // W1
-  std::atomic_thread_fence(std::memory_order_release);           // W2
-
+  SlotHeader& header = detail::slot_header(slot);
   const auto length = static_cast<std::uint32_t>(payload.size());
-  std::atomic_ref<std::uint64_t>{detail::word_at(slot, offsetof(SlotHeader, meta))}.store(
-      pack_meta(epoch, length), std::memory_order_relaxed);  // W3
-  for (std::size_t offset = 0; offset < payload.size(); offset += sizeof(std::uint64_t)) {
-    std::uint64_t word = 0;
-    std::memcpy(&word, payload.data() + offset, std::min(sizeof word, payload.size() - offset));
-    std::atomic_ref<std::uint64_t>{detail::word_at(slot, kSlotHeaderSize + offset)}.store(
-        word, std::memory_order_relaxed);
-  }
 
-  seq_word.store(committed_word(seq), std::memory_order_release);  // W4
+  atomics::store_relaxed(header.seq_word, writing_word(seq));     // W1
+  atomics::fence_release();                                       // W2
+  atomics::store_relaxed(header.meta, pack_meta(epoch, length));  // W3
+  atomics::store_words_relaxed(slot + kSlotHeaderSize, payload);  // W3
+  atomics::store_release(header.seq_word, committed_word(seq));   // W4
 }
 
 /// Default for read_slot's test seam: does nothing and compiles away.
@@ -88,10 +78,9 @@ template <typename Hook = NoHook>
                                  std::uint64_t expected, std::span<std::byte> out,
                                  Hook&& between_copy_and_recheck = {}) noexcept {
   REVENANT_ASSERT(out.size() >= capacity);
-  REVENANT_ASSERT(reinterpret_cast<std::uintptr_t>(slot) % alignof(std::uint64_t) == 0);
+  const SlotHeader& header = detail::slot_header(slot);
 
-  std::atomic_ref<std::uint64_t> seq_word{detail::word_at(slot, offsetof(SlotHeader, seq_word))};
-  const std::uint64_t v1 = seq_word.load(std::memory_order_acquire);  // R1
+  const std::uint64_t v1 = atomics::load_acquire(header.seq_word);  // R1
   if (v1 < writing_word(expected)) {
     return {SlotState::kNotYet, sequence_of(v1), 0, 0};
   }
@@ -102,21 +91,14 @@ template <typename Hook = NoHook>
     return {SlotState::kLapped, sequence_of(v1), 0, 0};
   }
 
-  const std::uint64_t meta =
-      std::atomic_ref<std::uint64_t>{detail::word_at(slot, offsetof(SlotHeader, meta))}.load(
-          std::memory_order_relaxed);  // R2
+  const std::uint64_t meta = atomics::load_relaxed(header.meta);  // R2
   const std::uint32_t length = meta_length(meta);
   const std::uint32_t copy_length = length <= capacity ? length : 0;
-  for (std::size_t offset = 0; offset < copy_length; offset += sizeof(std::uint64_t)) {
-    const std::uint64_t word =
-        std::atomic_ref<std::uint64_t>{detail::word_at(slot, kSlotHeaderSize + offset)}.load(
-            std::memory_order_relaxed);
-    std::memcpy(out.data() + offset, &word, std::min(sizeof word, copy_length - offset));
-  }
+  atomics::load_words_relaxed(slot + kSlotHeaderSize, out.first(copy_length));  // R2
 
-  std::atomic_thread_fence(std::memory_order_acquire);  // R3
+  atomics::fence_acquire();  // R3
   between_copy_and_recheck();
-  const std::uint64_t v2 = seq_word.load(std::memory_order_relaxed);  // R4
+  const std::uint64_t v2 = atomics::load_relaxed(header.seq_word);  // R4
   if (v2 != v1) {
     return {SlotState::kTorn, sequence_of(v2), 0, 0};
   }
@@ -128,8 +110,7 @@ template <typename Hook = NoHook>
 
 /// Acquire load of a slot's seq_word, for publisher recovery and observers.
 [[nodiscard]] inline std::uint64_t load_seq_word(const std::byte* slot) noexcept {
-  return std::atomic_ref<std::uint64_t>{detail::word_at(slot, offsetof(SlotHeader, seq_word))}.load(
-      std::memory_order_acquire);
+  return atomics::load_acquire(detail::slot_header(slot).seq_word);
 }
 
 }  // namespace revenant::core

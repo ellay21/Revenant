@@ -1,6 +1,7 @@
 #pragma once
 
 #include <revenant/config.hpp>
+#include <revenant/core/atomics.hpp>
 #include <revenant/core/ring.hpp>
 #include <revenant/errors.hpp>
 
@@ -232,8 +233,8 @@ inline void initialize_segment(std::span<std::byte> segment, RingGeometry g,
   REVENANT_ASSERT(segment.size() == segment_size(g));
   REVENANT_ASSERT(reinterpret_cast<std::uintptr_t>(segment.data()) % alignof(std::uint64_t) == 0);
 
-  std::atomic_ref<std::uint64_t> magic{header_of(segment.data()).magic};
-  REVENANT_ASSERT(magic.load(std::memory_order_relaxed) == 0);
+  std::uint64_t& magic = header_of(segment.data()).magic;
+  REVENANT_ASSERT(atomics::load_relaxed(magic) == 0);
 
   constexpr std::size_t kAfterMagic = sizeof(SegmentHeader::magic);
   std::memset(segment.data() + kAfterMagic, 0, segment.size() - kAfterMagic);
@@ -248,7 +249,7 @@ inline void initialize_segment(std::span<std::byte> segment, RingGeometry g,
               reinterpret_cast<const std::byte*>(&header) + kAfterMagic,
               sizeof header - kAfterMagic);
 
-  magic.store(kMagic, std::memory_order_release);
+  atomics::store_release(magic, kMagic);
 }
 
 /// Outcome of validate_header: `geometry` is meaningful only when `error` is empty.
@@ -266,10 +267,7 @@ struct HeaderCheck {
     return {revenant::errc::segment_incomplete};
   }
 
-  // A lock-free atomic load never writes, so the const_cast is safe even on a PROT_READ mapping.
-  const std::uint64_t magic =
-      std::atomic_ref<std::uint64_t>{const_cast<std::uint64_t&>(header_of(segment.data()).magic)}
-          .load(std::memory_order_acquire);
+  const std::uint64_t magic = atomics::load_acquire(header_of(segment.data()).magic);
   if (magic == 0) {
     return {revenant::errc::segment_incomplete};
   }

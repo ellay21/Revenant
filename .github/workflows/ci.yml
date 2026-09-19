@@ -42,8 +42,10 @@ jobs:
         cxx: [g++-13, g++-14, clang++-18]
         preset: [dev, release]
         include:
-          # arm64's weaker memory model exposes ordering bugs that x86-64 hides.
+          # arm64's weaker memory model exposes ordering bugs that x86-64 hides; release adds
+          # compiler reordering on top of hardware reordering.
           - { os: ubuntu-24.04-arm, cxx: g++-13, preset: dev }
+          - { os: ubuntu-24.04-arm, cxx: g++-13, preset: release }
     env:
       CXX: ${{ matrix.cxx }}
     steps:

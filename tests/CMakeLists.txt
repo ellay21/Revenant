@@ -10,11 +10,13 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
 include(GoogleTest)
+find_package(Threads REQUIRED)
 
 # One executable per suite; the suite name doubles as the ctest label.
 function(revenant_add_test_suite target label)
   add_executable(${target} ${ARGN})
-  target_link_libraries(${target} PRIVATE revenant::revenant GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(${target} PRIVATE revenant::revenant GTest::gtest_main Threads::Threads)
   revenant_set_warnings(${target})
   gtest_discover_tests(${target} DISCOVERY_MODE PRE_TEST PROPERTIES LABELS ${label})
 endfunction()
@@ -26,8 +28,12 @@ revenant_add_test_suite(
   unit/test_config.cpp
   unit/test_errors.cpp
   unit/test_layout.cpp
+  unit/test_payload.cpp
   unit/test_ring.cpp
   unit/test_seqlock.cpp
   unit/test_validate_header.cpp)
 target_compile_definitions(revenant_unit_tests
                            PRIVATE REVENANT_TEST_EXPECTED_VERSION="${PROJECT_VERSION}")
+
+# Message count scales with REVENANT_STRESS_MESSAGES (default 10^6).
+revenant_add_test_suite(revenant_stress_tests stress stress/stress_seqlock.cpp)

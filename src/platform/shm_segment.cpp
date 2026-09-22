@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <string>
 #include <system_error>
@@ -26,6 +27,9 @@ std::string object_name(std::string_view name) {
 }
 
 int open_object(std::string_view name, int flags) {
+  if (!is_valid_channel_name(name)) {
+    throw std::system_error(revenant::errc::invalid_name, "channel name");
+  }
   const std::string path = object_name(name);
   const int fd = ::shm_open(path.c_str(), flags | O_CLOEXEC, S_IRUSR | S_IWUSR);
   if (fd < 0) {
@@ -38,6 +42,17 @@ int open_object(std::string_view name, int flags) {
 }
 
 }  // namespace
+
+bool is_valid_channel_name(std::string_view name) noexcept {
+  constexpr std::size_t kMaxLength = 200;
+  if (name.empty() || name.size() > kMaxLength || name.front() == '.') {
+    return false;
+  }
+  return std::all_of(name.begin(), name.end(), [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' ||
+           c == '_' || c == '-';
+  });
+}
 
 ShmSegment ShmSegment::open_or_create(std::string_view name) {
   return ShmSegment{open_object(name, O_RDWR | O_CREAT)};
@@ -74,10 +89,14 @@ void ShmSegment::close() noexcept {
   }
 }
 
-void ShmSegment::resize(std::uint64_t bytes) {
+void ShmSegment::reserve(std::uint64_t bytes) {
   REVENANT_ASSERT(!is_mapped());
-  if (::ftruncate(fd_, static_cast<off_t>(bytes)) != 0) {
+  if (::ftruncate(fd_, 0) != 0) {
     throw_errno(errno, "ftruncate");
+  }
+  // posix_fallocate returns the error number instead of setting errno.
+  if (const int error = ::posix_fallocate(fd_, 0, static_cast<off_t>(bytes)); error != 0) {
+    throw_errno(error, "posix_fallocate");
   }
 }
 
@@ -113,6 +132,9 @@ std::uint64_t ShmSegment::file_size() const {
 }
 
 void unlink_channel(std::string_view name) {
+  if (!is_valid_channel_name(name)) {
+    throw std::system_error(revenant::errc::invalid_name, "channel name");
+  }
   const std::string path = object_name(name);
   if (::shm_unlink(path.c_str()) != 0 && errno != ENOENT) {
     throw_errno(errno, "shm_unlink " + path);

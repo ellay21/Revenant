@@ -13,9 +13,13 @@ namespace revenant::platform {
 
 enum class Access : std::uint8_t { kReadWrite, kReadOnly };
 
+/// [A-Za-z0-9._-]{1,200}, not starting with '.', so a name can never escape or hide in /dev/shm.
+[[nodiscard]] bool is_valid_channel_name(std::string_view name) noexcept;
+
 class ShmSegment {
  public:
   /// Opens `name` read-write, creating it empty (mode 0600) if absent. Not mapped yet.
+  /// An invalid name is errc::invalid_name.
   [[nodiscard]] static ShmSegment open_or_create(std::string_view name);
 
   /// Opens an existing `name`. Not mapped yet.
@@ -27,8 +31,11 @@ class ShmSegment {
   ShmSegment& operator=(const ShmSegment&) = delete;
   ~ShmSegment();
 
-  /// Sets the file size. Narrow contract: opened read-write and not mapped.
-  void resize(std::uint64_t bytes);
+  /// Sets the file size to exactly `bytes` with every page allocated now. On tmpfs, ftruncate
+  /// alone makes a sparse file, so a full /dev/shm would surface later as SIGBUS on first
+  /// write; posix_fallocate reports ENOSPC here instead.
+  /// Narrow contract: opened read-write and not mapped.
+  void reserve(std::uint64_t bytes);
 
   /// Maps the whole file MAP_SHARED; a read-only mapping turns stray writes into SIGSEGV.
   /// Narrow contract: not already mapped.

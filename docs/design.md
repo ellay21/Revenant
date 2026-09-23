@@ -71,7 +71,29 @@ Every atomic access goes through [`core/atomics.hpp`](../include/revenant/core/a
 
 **Mapped memory and object lifetime.** The wire structs are implicit-lifetime types: trivially copyable aggregates with no padding. Code views mapped bytes through them, and touches every field that can change after initialisation only through `atomic_ref`. C++23's `std::start_lifetime_as` is the standard spelling of this established practice.
 
-## 6. What the tests do and do not prove
+## 6. The publisher lease
+
+At most one publisher may write a channel, and subscribers must learn within a bounded time that it has died. Both requirements are met by a single kernel object. The publisher holds an exclusive **open-file-description (OFD) lock** (`fcntl(F_OFD_SETLK)`) on the whole segment file. It is released when the last descriptor of the holding open file description closes, and that happens when the process exits by *any* means, including `SIGKILL` and the OOM killer. The implementation is [`platform/lease.hpp`](../include/revenant/platform/lease.hpp).
+
+| Considered | Problem |
+|---|---|
+| PID in shared memory + `kill(pid, 0)` | PIDs are reused. A zombie still answers `kill(pid, 0)`, so it looks alive. |
+| PID + start time + heartbeat | Correct, but a silent publisher is ambiguous: dead, stopped, or just idle? It also needs a timeout tuned against false positives. |
+| Robust `pthread_mutex` in shared memory | Probing requires `trylock`, which writes, and subscribers map the segment read-only. An `EOWNERDEAD` recovery protocol is also needed. |
+| POSIX record lock (`F_SETLK`) | Owned by the *process*. A second open in the same process silently succeeds, and closing *any* descriptor to the file drops the lock. |
+| `flock` | Correct ownership, but it cannot be queried without acquiring it. |
+| **OFD lock** | Owned by the open file description, can be queried with `F_OFD_GETLK` from a read-only descriptor, and released by the kernel on death. |
+
+**Consequences**
+- **Single writer (INV1) is enforced by the kernel.** A second publisher, even a second `open` in the same process, fails to lock.
+- **Liveness is definitive.** A subscriber that sees no new messages probes the lock (`F_OFD_GETLK`, one syscall, rate-limited). A held lock means the publisher is alive; a free lock means it is gone. There are no false positives and no PID-reuse races. A zombie publisher has already closed its descriptors, so its lease is already free.
+- **Probing never acquires,** so it can never make a starting publisher fail.
+- **A clean exit and a crash look the same** to subscribers. This is intentional.
+- **Caveat:** a child `fork`ed without `exec` shares the open file description and keeps the lease alive. Publishers must open the segment `O_CLOEXEC` (they do) and should not fork without exec.
+
+The integration tests pin each of these semantics. Swapping the OFD calls for POSIX `F_SETLK`/`F_GETLK` makes three of them fail.
+
+## 7. What the tests do and do not prove
 
 - **Single-threaded unit tests prove the protocol's decisions.** A test seam runs between the copy and the re-check and rewrites the slot "during" the read, so torn reads are exercised deterministically. Mutation checks confirm the tests fail if the re-check is removed.
 - **x86-64 never reorders a store with an older store,** so a missing `release` can pass every x86 test. The arm64 CI job and ThreadSanitizer reduce that risk; they do not eliminate it. Exhaustive weak-memory checking (herd7, GenMC) is future work.

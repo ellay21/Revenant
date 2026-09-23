@@ -19,7 +19,8 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 
-add_library(revenant STATIC src/config.cpp src/errors.cpp src/platform/shm_segment.cpp)
+add_library(revenant STATIC src/config.cpp src/errors.cpp src/platform/lease.cpp
+                            src/platform/shm_segment.cpp)
 add_library(revenant::revenant ALIAS revenant)
 target_include_directories(revenant PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 target_compile_features(revenant PUBLIC cxx_std_20)

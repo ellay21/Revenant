@@ -103,7 +103,7 @@ jobs:
     container: ghcr.io/ellay21/revenant-ci@sha256:63ea11ad898a4cad24265770b69f00e2e6f2b4dc0724452a94061bea0031b35e
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Generate per-header TUs and compile
         run: |
@@ -219,7 +219,7 @@ jobs:
     container: ghcr.io/ellay21/revenant-ci@sha256:7ec9e10579cacee9ad99d34012b13cf646fde088dde1f9438c9fec7d4f5793eb
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Run packaging tests
         env:

@@ -3,9 +3,13 @@
 
 #include <gtest/gtest.h>
 
+#include <signal.h>
+
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <optional>
+#include <thread>
 
 #include "support/child_process.hpp"
 #include "support/unique_channel.hpp"
@@ -112,6 +116,73 @@ TEST(Lease, KernelReleasesTheLeaseOfAKilledHolder) {
   EXPECT_TRUE(revenant::testing::killed_by(holder.wait_for(5s), SIGKILL));
   EXPECT_FALSE(lease_is_held(probe.fd()));
   EXPECT_TRUE(try_acquire_lease(probe.fd()));
+}
+
+// kill(pid, 0) reports a zombie as alive; the lease does not, because a dying process closes
+// its descriptors before it becomes a zombie.
+TEST(Lease, ZombieHolderHasAlreadyReleasedIt) {
+  const UniqueChannel channel;
+  const ShmSegment probe = make_segment(channel);
+  ChildProcess holder = spawn_holder(channel);
+  ASSERT_EQ(holder.receive(5s), 1U);
+
+  holder.kill(SIGKILL);
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (lease_is_held(probe.fd()) && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(1ms);
+  }
+  EXPECT_FALSE(lease_is_held(probe.fd()));
+  ASSERT_EQ(::kill(holder.pid(), 0), 0) << "the unreaped child must still exist, as a zombie";
+  EXPECT_TRUE(revenant::testing::killed_by(holder.wait_for(5s), SIGKILL));
+}
+
+TEST(Lease, BlockingAcquireReturnsAsSoonAsTheHolderDies) {
+  const UniqueChannel channel;
+  const ShmSegment standby = make_segment(channel);
+  ChildProcess holder = spawn_holder(channel);
+  ASSERT_EQ(holder.receive(5s), 1U);
+
+  std::atomic<bool> acquired{false};
+  std::thread waiter{[&] {
+    revenant::platform::acquire_lease_blocking(standby.fd());
+    acquired.store(true);
+  }};
+  std::this_thread::sleep_for(50ms);  // the behaviour under test: still blocked while held
+  EXPECT_FALSE(acquired.load());
+
+  holder.kill(SIGKILL);
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (!acquired.load() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(1ms);
+  }
+  EXPECT_TRUE(acquired.load());
+  waiter.join();
+  EXPECT_TRUE(revenant::testing::killed_by(holder.wait_for(5s), SIGKILL));
+}
+
+TEST(Lease, BlockingAcquireOfAFreeLeaseReturnsImmediately) {
+  const UniqueChannel channel;
+  const ShmSegment segment = make_segment(channel);
+  revenant::platform::acquire_lease_blocking(segment.fd());
+  const ShmSegment probe = ShmSegment::open(channel.name(), Access::kReadOnly);
+  EXPECT_TRUE(lease_is_held(probe.fd()));
+}
+
+// Documented caveat: fork without exec shares the open file description, and with it the lease.
+TEST(Lease, ChildForkedAfterAcquiringKeepsTheLeaseAlive) {
+  const UniqueChannel channel;
+  std::optional<ShmSegment> holder{make_segment(channel)};
+  const ShmSegment probe = ShmSegment::open(channel.name(), Access::kReadOnly);
+  ASSERT_TRUE(try_acquire_lease(holder->fd()));
+
+  ChildProcess child =
+      ChildProcess::spawn([](const ChildLink& link) { return link.wait_go() ? 0 : 1; });
+  holder.reset();
+  EXPECT_TRUE(lease_is_held(probe.fd())) << "the child's inherited descriptor still holds it";
+
+  child.go();
+  EXPECT_TRUE(revenant::testing::exited_with(child.wait_for(5s), 0));
+  EXPECT_FALSE(lease_is_held(probe.fd()));
 }
 
 }  // namespace

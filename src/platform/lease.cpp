@@ -29,6 +29,15 @@ bool try_acquire_lease(int fd) {
   throw std::system_error(errno, std::system_category(), "fcntl(F_OFD_SETLK)");
 }
 
+void acquire_lease_blocking(int fd) {
+  struct flock lock = whole_file(F_WRLCK);
+  while (::fcntl(fd, F_OFD_SETLKW, &lock) != 0) {
+    if (errno != EINTR) {
+      throw std::system_error(errno, std::system_category(), "fcntl(F_OFD_SETLKW)");
+    }
+  }
+}
+
 bool lease_is_held(int fd) {
   struct flock lock = whole_file(F_RDLCK);
   if (::fcntl(fd, F_OFD_GETLK, &lock) != 0) {

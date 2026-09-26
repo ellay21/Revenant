@@ -25,6 +25,7 @@ revenant_add_test_suite(
   revenant_unit_tests
   unit
   unit/test_atomics.cpp
+  unit/test_channel_config.cpp
   unit/test_config.cpp
   unit/test_errors.cpp
   unit/test_layout.cpp

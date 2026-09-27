@@ -111,6 +111,22 @@ TEST(ShmSegment, ReserveSetsTheExactSizeAndCanShrink) {
   EXPECT_EQ(segment.file_size(), 4096U);
 }
 
+// A subscriber may have the old file mapped while a publisher re-initialises it; truncating to
+// zero first would turn its next read of the header into SIGBUS.
+TEST(ShmSegment, ReserveNeverDropsBytesWithinTheNewSize) {
+  const UniqueChannel channel;
+  ShmSegment segment = ShmSegment::open_or_create(channel.name());
+  segment.reserve(4096);
+  segment.map(Access::kReadWrite);
+  segment.bytes()[100] = std::byte{0x5A};
+  segment.unmap();
+
+  segment.reserve(8192);
+  segment.map(Access::kReadWrite);
+  EXPECT_EQ(segment.bytes()[100], std::byte{0x5A});
+  EXPECT_EQ(segment.bytes()[8191], std::byte{0});
+}
+
 // The failure surfaces at create time as an exception, not later as SIGBUS inside publish.
 TEST(ShmSegment, ReservingMoreThanTmpfsCanHoldFailsUpFront) {
   const UniqueChannel channel;

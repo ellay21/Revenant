@@ -93,7 +93,35 @@ At most one publisher may write a channel, and subscribers must learn within a b
 
 The integration tests pin each of these semantics. Swapping the OFD calls for POSIX `F_SETLK`/`F_GETLK` makes three of them fail.
 
-## 7. What the tests do and do not prove
+## 7. Publisher start-up and recovery
+
+`Publisher::create` runs the same steps whether the channel is new, cleanly abandoned, or left behind by a crash. The implementation is [`channel/publisher.cpp`](../src/channel/publisher.cpp).
+
+```text
+open or create the file (O_CLOEXEC, mode 0600)
+take the lease                      F_OFD_SETLK, or F_OFD_SETLKW for a hot standby
+if the file is empty, or validate_header says incomplete (magic == 0 or < 256 bytes):
+    resize to 256 + N × slot_size     never through zero: a waiting subscriber may have it mapped
+    initialize_segment                zero everything, write the header, then magic (release)
+else:
+    validate; a foreign segment or another geometry is refused and never overwritten
+recover:
+    h = head (acquire)
+    if slot(h + 1) holds committed(h + 1): h += 1, head ← h (release)    died between W4 and W5
+    next sequence = h + 1
+epoch ← epoch + 1 (release)
+```
+
+Each publish ends with **W5**, `head ← s` (release). This lets a subscriber attach at the live edge and find a resume point after an overrun.
+
+**Why this is correct:**
+- **Only the lease holder writes.** The kernel released the previous holder's lease only after the holder died, so every store it made is visible to us.
+- **INV3: at most one committed message is ahead of `head`.** W5 follows W4 directly, so roll-forward checks a single slot.
+- **A slot left mid-write (W1–W3) was never committed,** so no subscriber delivered it. The new publisher reuses that sequence for its first message. There is no duplicate, and the slot is repaired simply by writing it normally.
+- **Recovery is idempotent.** Dying during recovery leaves state that the next publisher recovers the same way.
+- **An incomplete segment is always abandoned.** We hold the lease, so its creator is dead. Re-initialising it is safe. A segment with *foreign* magic is never touched.
+
+## 8. What the tests do and do not prove
 
 - **Single-threaded unit tests prove the protocol's decisions.** A test seam runs between the copy and the re-check and rewrites the slot "during" the read, so torn reads are exercised deterministically. Mutation checks confirm the tests fail if the re-check is removed.
 - **x86-64 never reorders a store with an older store,** so a missing `release` can pass every x86 test. The arm64 CI job and ThreadSanitizer reduce that risk; they do not eliminate it. Exhaustive weak-memory checking (herd7, GenMC) is future work.

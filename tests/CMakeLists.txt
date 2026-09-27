@@ -38,7 +38,7 @@ target_compile_definitions(revenant_unit_tests
 
 # Real /dev/shm, real file descriptors, forked children.
 revenant_add_test_suite(revenant_integration_tests integration integration/test_lease.cpp
-                        integration/test_shm_segment.cpp)
+                        integration/test_publisher.cpp integration/test_shm_segment.cpp)
 
 # Message count scales with REVENANT_STRESS_MESSAGES (default 10^6).
 revenant_add_test_suite(revenant_stress_tests stress stress/stress_seqlock.cpp)

@@ -224,9 +224,10 @@ inline constexpr std::uint64_t kFnvPrime = 0x0000'0100'0000'01b3;
 
 /// Writes a fresh segment: everything after `magic` is zeroed and the header filled in, then
 /// `magic` is stored last with release ordering, publishing the rest to any acquiring reader.
-/// `magic` itself is never written with a plain store, because a subscriber may be polling it.
+/// `magic` itself is never written with a plain store, because a subscriber may be polling it;
+/// leftover bytes there (a truncated, abandoned file) are first cleared atomically.
 /// Narrow contract: caller holds the publisher lease, `g` is valid, `segment.size()` equals
-/// segment_size(g), `segment` is 8-byte aligned, and `magic` is 0.
+/// segment_size(g), and `segment` is 8-byte aligned.
 inline void initialize_segment(std::span<std::byte> segment, RingGeometry g,
                                std::uint64_t created_unix_ns) noexcept {
   REVENANT_ASSERT(RingGeometry::is_valid(g.slot_size, g.slot_count));
@@ -234,7 +235,7 @@ inline void initialize_segment(std::span<std::byte> segment, RingGeometry g,
   REVENANT_ASSERT(reinterpret_cast<std::uintptr_t>(segment.data()) % alignof(std::uint64_t) == 0);
 
   std::uint64_t& magic = header_of(segment.data()).magic;
-  REVENANT_ASSERT(atomics::load_relaxed(magic) == 0);
+  atomics::store_relaxed(magic, 0);
 
   constexpr std::size_t kAfterMagic = sizeof(SegmentHeader::magic);
   std::memset(segment.data() + kAfterMagic, 0, segment.size() - kAfterMagic);

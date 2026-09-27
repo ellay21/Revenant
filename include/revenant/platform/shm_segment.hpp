@@ -33,7 +33,8 @@ class ShmSegment {
 
   /// Sets the file size to exactly `bytes` with every page allocated now. On tmpfs, ftruncate
   /// alone makes a sparse file, so a full /dev/shm would surface later as SIGBUS on first
-  /// write; posix_fallocate reports ENOSPC here instead.
+  /// write; posix_fallocate reports ENOSPC here instead. Bytes within the new size are kept,
+  /// so a reader mapping the old file never loses pages it can still address.
   /// Narrow contract: opened read-write and not mapped.
   void reserve(std::uint64_t bytes);
 

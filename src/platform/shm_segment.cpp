@@ -91,7 +91,9 @@ void ShmSegment::close() noexcept {
 
 void ShmSegment::reserve(std::uint64_t bytes) {
   REVENANT_ASSERT(!is_mapped());
-  if (::ftruncate(fd_, 0) != 0) {
+  // Shrink only to the target, never through zero: a reader that mapped the old file must keep
+  // valid pages for every byte the new size still covers, or its next read is SIGBUS.
+  if (file_size() > bytes && ::ftruncate(fd_, static_cast<off_t>(bytes)) != 0) {
     throw_errno(errno, "ftruncate");
   }
   // posix_fallocate returns the error number instead of setting errno.

@@ -20,7 +20,8 @@ include(CompilerWarnings)
 include(Sanitizers)
 
 add_library(revenant STATIC src/config.cpp src/errors.cpp src/channel/publisher.cpp
-                            src/platform/lease.cpp src/platform/shm_segment.cpp)
+                            src/channel/subscriber.cpp src/platform/lease.cpp
+                            src/platform/shm_segment.cpp)
 add_library(revenant::revenant ALIAS revenant)
 target_include_directories(revenant PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 target_compile_features(revenant PUBLIC cxx_std_20)

@@ -5,6 +5,7 @@
 #include <revenant/core/ring.hpp>
 #include <revenant/platform/shm_segment.hpp>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -25,26 +26,35 @@ class Subscriber {
   [[nodiscard]] static Subscriber attach(std::string_view channel,
                                          const SubscriberConfig& config = {});
 
-  /// Reads the next message into `buffer`, or reports why there is none. Never blocks.
+  /// Reads the next message into `buffer`, or reports why there is none. Never blocks. While
+  /// idle it notices a new publisher (kEpochChange) and, at most once per
+  /// liveness_probe_interval, checks with one fcntl that a publisher holds the lease
+  /// (kPublisherDead, reported once per death).
   /// Narrow contract: buffer.size() >= payload_capacity().
   ReadResult try_read(std::span<std::byte> buffer) noexcept;
 
   /// Sequence the next kMessage will carry if nothing is missed.
   [[nodiscard]] std::uint64_t next_sequence() const noexcept { return next_; }
+  /// Epoch of the publisher this subscriber last heard from.
+  [[nodiscard]] std::uint32_t epoch() const noexcept { return epoch_; }
   [[nodiscard]] std::uint32_t payload_capacity() const noexcept { return capacity_; }
   [[nodiscard]] core::RingGeometry geometry() const noexcept { return geometry_; }
 
  private:
   Subscriber(platform::ShmSegment segment, core::RingGeometry geometry, std::uint64_t next,
-             const SubscriberConfig& config) noexcept;
+             std::uint32_t epoch, const SubscriberConfig& config) noexcept;
 
   ReadResult overrun(std::uint64_t observed_seq) noexcept;
+  ReadResult idle() noexcept;
 
   platform::ShmSegment segment_;
   core::RingGeometry geometry_;
   std::uint32_t capacity_;
+  std::uint32_t epoch_;
   std::uint64_t next_;
   SubscriberConfig config_;
+  std::chrono::steady_clock::time_point last_probe_{};
+  bool dead_reported_ = false;
 };
 
 }  // namespace revenant

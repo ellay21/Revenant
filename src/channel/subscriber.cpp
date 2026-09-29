@@ -3,6 +3,7 @@
 #include <revenant/core/layout.hpp>
 #include <revenant/core/seqlock.hpp>
 #include <revenant/errors.hpp>
+#include <revenant/platform/lease.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -21,10 +22,12 @@ namespace {
 }  // namespace
 
 Subscriber::Subscriber(platform::ShmSegment segment, core::RingGeometry geometry,
-                       std::uint64_t next, const SubscriberConfig& config) noexcept
+                       std::uint64_t next, std::uint32_t epoch,
+                       const SubscriberConfig& config) noexcept
     : segment_(std::move(segment)),
       geometry_(geometry),
       capacity_(core::payload_capacity(geometry)),
+      epoch_(epoch),
       next_(next),
       config_(config) {}
 
@@ -42,12 +45,13 @@ Subscriber Subscriber::attach(std::string_view channel, const SubscriberConfig& 
       const core::HeaderCheck check = core::validate_header(segment.bytes());
       error = check.error;
       if (!error) {
-        const std::uint64_t head =
-            core::atomics::load_acquire(core::control_of(segment.bytes().data()).head);
+        const core::ControlBlock& control = core::control_of(segment.bytes().data());
+        const std::uint64_t head = core::atomics::load_acquire(control.head);
         if (head >= core::kMaxSequence) {
           fail(errc::segment_corrupt, channel);
         }
-        return Subscriber{std::move(segment), check.geometry, head + 1, config};
+        const std::uint32_t epoch = core::atomics::load_acquire(control.epoch);
+        return Subscriber{std::move(segment), check.geometry, head + 1, epoch, config};
       }
     }
     if (error != errc::segment_incomplete || std::chrono::steady_clock::now() >= deadline) {
@@ -63,18 +67,49 @@ ReadResult Subscriber::try_read(std::span<std::byte> buffer) noexcept {
   const core::SlotRead r = core::read_slot(slot, capacity_, next_, buffer);
   switch (r.state) {
     case core::SlotState::kCommitted: {
+      // INV6: announce a new publisher before its first message; this read is not consumed.
+      if (r.epoch != epoch_) {
+        epoch_ = r.epoch;
+        return {ReadStatus::kEpochChange, next_, next_, r.epoch};
+      }
+      dead_reported_ = false;
       const std::uint64_t seq = next_++;
       return {ReadStatus::kMessage, seq, seq, r.epoch, r.length};
     }
     case core::SlotState::kNotYet:
     case core::SlotState::kInProgress:
-      break;
+      return idle();
     case core::SlotState::kLapped:
     case core::SlotState::kTorn:
       return overrun(r.observed_seq);
     case core::SlotState::kCorrupt: {
       const std::uint64_t seq = next_++;  // INV7: skip it, but report it
       return {ReadStatus::kGap, seq, seq};
+    }
+  }
+  return idle();
+}
+
+// Only reached with nothing to read, so the extra load and the clock read cost the hot path
+// nothing. A restarted publisher bumps the epoch before publishing, so an idle subscriber learns
+// of it immediately. Death needs a syscall, so it is rate-limited.
+ReadResult Subscriber::idle() noexcept {
+  const std::uint32_t epoch =
+      core::atomics::load_acquire(core::control_of(segment_.bytes().data()).epoch);
+  if (epoch != epoch_) {
+    epoch_ = epoch;
+    dead_reported_ = false;
+    return {ReadStatus::kEpochChange, next_, next_, epoch};
+  }
+
+  const auto now = std::chrono::steady_clock::now();
+  if (now - last_probe_ >= config_.liveness_probe_interval) {
+    last_probe_ = now;
+    if (platform::lease_is_held(segment_.fd())) {
+      dead_reported_ = false;
+    } else if (!dead_reported_) {
+      dead_reported_ = true;
+      return {ReadStatus::kPublisherDead, next_, next_};
     }
   }
   return {ReadStatus::kEmpty, next_, next_};

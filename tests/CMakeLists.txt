@@ -42,4 +42,5 @@ revenant_add_test_suite(revenant_integration_tests integration integration/test_
                         integration/test_subscriber.cpp)
 
 # Message count scales with REVENANT_STRESS_MESSAGES (default 10^6).
-revenant_add_test_suite(revenant_stress_tests stress stress/stress_seqlock.cpp)
+revenant_add_test_suite(revenant_stress_tests stress stress/stress_channel.cpp
+                        stress/stress_seqlock.cpp)

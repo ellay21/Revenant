@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <span>
 #include <system_error>
 #include <thread>
@@ -230,6 +231,86 @@ TEST_F(SubscriberTest, MovedSubscriberKeepsReading) {
   Subscriber moved{std::move(original)};
   publish_payload(publisher);
   expect_message(moved, 1, 1);
+}
+
+TEST_F(SubscriberTest, INV6_NewPublisherIsAnnouncedBeforeItsFirstMessage) {
+  std::optional<Publisher> publisher = Publisher::create(channel_.name(), kConfig);
+  Subscriber subscriber = Subscriber::attach(channel_.name());
+  publish_payload(*publisher);
+  expect_message(subscriber, 1, 1);
+
+  publisher.reset();
+  publisher.emplace(Publisher::create(channel_.name(), kConfig));
+  publish_payload(*publisher);
+
+  const ReadResult change = read(subscriber);
+  ASSERT_EQ(change.status, ReadStatus::kEpochChange);
+  EXPECT_EQ(change.epoch, 2U);
+  EXPECT_EQ(subscriber.epoch(), 2U);
+  expect_message(subscriber, 2, 2);
+}
+
+TEST_F(SubscriberTest, IdleSubscriberLearnsOfARestartBeforeAnyMessage) {
+  std::optional<Publisher> publisher = Publisher::create(channel_.name(), kConfig);
+  Subscriber subscriber = Subscriber::attach(channel_.name());
+  publisher.reset();
+  publisher.emplace(Publisher::create(channel_.name(), kConfig));
+
+  const ReadResult change = read(subscriber);
+  EXPECT_EQ(change.status, ReadStatus::kEpochChange);
+  EXPECT_EQ(change.epoch, 2U);
+  EXPECT_EQ(read(subscriber).status, ReadStatus::kEmpty);
+}
+
+TEST_F(SubscriberTest, G3_PublisherDeathIsReportedOnceWithinTheProbeInterval) {
+  std::optional<Publisher> publisher = Publisher::create(channel_.name(), kConfig);
+  Subscriber subscriber = Subscriber::attach(channel_.name(), {.liveness_probe_interval = 1ms});
+  EXPECT_EQ(read(subscriber).status, ReadStatus::kEmpty);
+
+  publisher.reset();
+  const auto died = std::chrono::steady_clock::now();
+  ReadResult r{};
+  do {
+    r = read(subscriber);
+  } while (r.status == ReadStatus::kEmpty && std::chrono::steady_clock::now() - died < 5s);
+  EXPECT_EQ(r.status, ReadStatus::kPublisherDead);
+  EXPECT_LT(std::chrono::steady_clock::now() - died, 500ms);
+
+  const auto quiet_until = std::chrono::steady_clock::now() + 20ms;
+  while (std::chrono::steady_clock::now() < quiet_until) {
+    ASSERT_EQ(read(subscriber).status, ReadStatus::kEmpty) << "reported once per death";
+  }
+}
+
+TEST_F(SubscriberTest, LivePublisherIsNeverReportedDead) {
+  const Publisher publisher = Publisher::create(channel_.name(), kConfig);
+  Subscriber subscriber = Subscriber::attach(channel_.name(), {.liveness_probe_interval = 0ns});
+  for (int i = 0; i < 2000; ++i) {
+    ASSERT_EQ(read(subscriber).status, ReadStatus::kEmpty);
+  }
+}
+
+TEST_F(SubscriberTest, EachPublisherDeathIsReportedAgain) {
+  std::optional<Publisher> publisher = Publisher::create(channel_.name(), kConfig);
+  Subscriber subscriber = Subscriber::attach(channel_.name(), {.liveness_probe_interval = 0ns});
+  publisher.reset();
+  EXPECT_EQ(read(subscriber).status, ReadStatus::kPublisherDead);
+  EXPECT_EQ(read(subscriber).status, ReadStatus::kEmpty);
+
+  publisher.emplace(Publisher::create(channel_.name(), kConfig));
+  EXPECT_EQ(read(subscriber).status, ReadStatus::kEpochChange);
+  EXPECT_EQ(read(subscriber).status, ReadStatus::kEmpty);
+  publisher.reset();
+  EXPECT_EQ(read(subscriber).status, ReadStatus::kPublisherDead);
+}
+
+TEST_F(SubscriberTest, ChannelWithoutAPublisherIsReportedDeadOnTheFirstIdleRead) {
+  {
+    Publisher publisher = Publisher::create(channel_.name(), kConfig);
+    publish_payload(publisher);
+  }
+  Subscriber subscriber = Subscriber::attach(channel_.name());
+  EXPECT_EQ(read(subscriber).status, ReadStatus::kPublisherDead);
 }
 
 #ifndef NDEBUG

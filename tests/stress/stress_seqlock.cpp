@@ -6,17 +6,15 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <charconv>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <latch>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <vector>
 
 #include "support/payload.hpp"
+#include "support/stress.hpp"
 
 // INV2, INV4 and INV5 under real races: one writer, three readers and an observer share an
 // eight-slot ring, so readers are lapped and torn constantly. Every delivered message is
@@ -32,17 +30,6 @@ constexpr core::RingGeometry kGeometry{64, 8};
 constexpr std::uint32_t kCapacity = core::payload_capacity(kGeometry);
 constexpr std::uint32_t kEpoch = 1;
 constexpr std::size_t kReaders = 3;
-
-std::uint64_t message_count() {
-  // NOLINTNEXTLINE(concurrency-mt-unsafe): read before any thread starts.
-  const char* env = std::getenv("REVENANT_STRESS_MESSAGES");
-  std::uint64_t count = 1'000'000;
-  if (env != nullptr) {
-    const std::string_view text{env};
-    std::from_chars(text.data(), text.data() + text.size(), count);
-  }
-  return count;
-}
 
 struct ReaderStats {
   std::uint64_t received = 0;
@@ -95,7 +82,7 @@ void run_reader(const std::byte* segment, std::uint64_t messages, ReaderStats& s
 }
 
 TEST(StressSeqlock, ConcurrentReadersNeverDeliverATornOrMisorderedMessage) {
-  const std::uint64_t messages = message_count();
+  const std::uint64_t messages = testing::stress_message_count();
   std::vector<std::byte> segment(core::segment_size(kGeometry));
   core::initialize_segment(segment, kGeometry, 0);
   const std::byte* read_only = segment.data();

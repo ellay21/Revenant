@@ -121,7 +121,32 @@ Each publish ends with **W5**, `head ← s` (release). This lets a subscriber at
 - **Recovery is idempotent.** Dying during recovery leaves state that the next publisher recovers the same way.
 - **An incomplete segment is always abandoned.** We hold the lease, so its creator is dead. Re-initialising it is safe. A segment with *foreign* magic is never touched.
 
-## 8. What the tests do and do not prove
+## 8. Subscribers: gaps, epochs and death
+
+`Subscriber::try_read` never blocks, and it returns exactly one event per call.
+
+| Result | When |
+|---|---|
+| `kMessage` | The next message was copied out and validated. |
+| `kEmpty` | Nothing new yet. |
+| `kGap{first, last}` | Those messages were overwritten before they were read. The range is exact (G2). |
+| `kEpochChange{e}` | A new publisher took over. This is returned before its first message (INV6), and it is not a message: the next call returns that message. |
+| `kPublisherDead` | No process holds the lease. It is reported once per death. |
+
+**Joining and falling behind.** A subscriber attaches at the live edge, `head + 1`. When it finds its slot lapped or torn, it resumes **half a ring behind** the writer:
+- The oldest slot is the next one the writer overwrites, so resuming there would lap again at once.
+- The newest slot loses the most data.
+- Half a ring keeps recent data and leaves `slot_count / 2` messages of slack.
+
+`head` may lag the slot that was observed by one message (INV3), so the observed sequence bounds it from below.
+
+**Liveness without heartbeats.** Only while it has nothing to read, the subscriber:
+- loads `epoch`, which a new publisher bumps before publishing anything;
+- at most once per `liveness_probe_interval` (default 1 ms), asks the kernel whether any process holds the lease (`F_OFD_GETLK`, one syscall).
+
+The hot path pays for neither. Detection latency is bounded by the probe interval plus the caller's polling period, and there are no false positives: a held lease means a live publisher.
+
+## 9. What the tests do and do not prove
 
 - **Single-threaded unit tests prove the protocol's decisions.** A test seam runs between the copy and the re-check and rewrites the slot "during" the read, so torn reads are exercised deterministically. Mutation checks confirm the tests fail if the re-check is removed.
 - **x86-64 never reorders a store with an older store,** so a missing `release` can pass every x86 test. The arm64 CI job and ThreadSanitizer reduce that risk; they do not eliminate it. Exhaustive weak-memory checking (herd7, GenMC) is future work.

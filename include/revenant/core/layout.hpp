@@ -4,6 +4,7 @@
 #include <revenant/core/atomics.hpp>
 #include <revenant/core/ring.hpp>
 #include <revenant/errors.hpp>
+#include <revenant/fault.hpp>
 
 #include <array>
 #include <atomic>
@@ -250,6 +251,7 @@ inline void initialize_segment(std::span<std::byte> segment, RingGeometry g,
               reinterpret_cast<const std::byte*>(&header) + kAfterMagic,
               sizeof header - kAfterMagic);
 
+  REVENANT_FAULT_POINT(kDuringInit);  // F7
   atomics::store_release(magic, kMagic);
 }
 

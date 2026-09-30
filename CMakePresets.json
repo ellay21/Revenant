@@ -17,7 +17,7 @@
       "name": "dev",
       "inherits": "base",
       "displayName": "Debug, assertions on",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "REVENANT_FAULT_INJECTION": "ON" }
     },
     {
       "name": "release",

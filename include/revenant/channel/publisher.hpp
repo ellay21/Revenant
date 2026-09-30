@@ -6,6 +6,7 @@
 #include <revenant/core/layout.hpp>
 #include <revenant/core/ring.hpp>
 #include <revenant/core/seqlock.hpp>
+#include <revenant/fault.hpp>
 #include <revenant/platform/shm_segment.hpp>
 
 #include <cstddef>
@@ -36,7 +37,9 @@ class Publisher {
     std::byte* const base = segment_.bytes().data();
     const std::uint64_t seq = next_seq_;
     core::write_slot(core::slot_at(base, geometry_, seq), capacity_, seq, epoch_, payload);
+    REVENANT_FAULT_POINT(kAfterCommit);                              // F4
     core::atomics::store_release(core::control_of(base).head, seq);  // W5
+    REVENANT_FAULT_POINT(kAfterHead);                                // F5
     next_seq_ = seq + 1;
     return seq;
   }

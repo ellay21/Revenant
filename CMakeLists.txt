@@ -13,6 +13,7 @@ endif()
 
 option(REVENANT_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
 option(REVENANT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ${PROJECT_IS_TOP_LEVEL})
+option(REVENANT_FAULT_INJECTION "Compile fault-injection points for the crash suite" OFF)
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
@@ -27,6 +28,12 @@ target_include_directories(revenant PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DI
 target_compile_features(revenant PUBLIC cxx_std_20)
 target_compile_definitions(revenant PRIVATE REVENANT_VERSION="${PROJECT_VERSION}")
 revenant_set_warnings(revenant)
+
+# PUBLIC: the header-only core contains fault points too, so every consumer must agree.
+if(REVENANT_FAULT_INJECTION)
+  target_sources(revenant PRIVATE src/fault.cpp)
+  target_compile_definitions(revenant PUBLIC REVENANT_FAULT_INJECTION=1)
+endif()
 
 if(REVENANT_BUILD_TESTS)
   enable_testing()

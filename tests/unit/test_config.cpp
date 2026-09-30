@@ -1,4 +1,5 @@
 #include <revenant/config.hpp>
+#include <revenant/fault.hpp>
 
 #include <gtest/gtest.h>
 
@@ -36,6 +37,14 @@ TEST(Config, CacheLineIsPowerOfTwo) {
   static_assert(std::has_single_bit(revenant::kCacheLine));
   EXPECT_GE(revenant::kCacheLine, 64U);
 }
+
+#ifndef REVENANT_FAULT_INJECTION
+TEST(Config, FaultPointsCompileToNothingWithoutInjection) {
+  REVENANT_FAULT_POINT(kAfterClaim);
+  REVENANT_FAULT_POINT(kDuringInit);
+  SUCCEED();
+}
+#endif
 
 #ifdef NDEBUG
 

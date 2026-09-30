@@ -3,6 +3,7 @@
 #include <revenant/core/layout.hpp>
 #include <revenant/core/seqlock.hpp>
 #include <revenant/errors.hpp>
+#include <revenant/fault.hpp>
 #include <revenant/platform/lease.hpp>
 #include <revenant/platform/shm_segment.hpp>
 
@@ -109,6 +110,7 @@ Publisher Publisher::create(std::string_view channel, const ChannelConfig& confi
 
   std::byte* const base = segment.bytes().data();
   const std::uint64_t head = recover_head(base, geometry, channel);
+  REVENANT_FAULT_POINT(kDuringRecovery);  // F6
   const std::uint32_t epoch = next_epoch(base);
   return Publisher{std::move(segment), geometry, epoch, head + 1};
 }

@@ -3,6 +3,7 @@
 #include <revenant/config.hpp>
 #include <revenant/core/atomics.hpp>
 #include <revenant/core/layout.hpp>
+#include <revenant/fault.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -55,11 +56,18 @@ inline void write_slot(std::byte* slot, std::uint32_t capacity, std::uint64_t se
   SlotHeader& header = detail::slot_header(slot);
   const auto length = static_cast<std::uint32_t>(payload.size());
 
+  // Split at a word boundary so F2 can stop the writer with exactly half the payload stored.
+  const std::size_t half = payload.size() / 2 / sizeof(std::uint64_t) * sizeof(std::uint64_t);
+
   atomics::store_relaxed(header.seq_word, writing_word(seq));     // W1
+  REVENANT_FAULT_POINT(kAfterClaim);                              // F1
   atomics::fence_release();                                       // W2
   atomics::store_relaxed(header.meta, pack_meta(epoch, length));  // W3
-  atomics::store_words_relaxed(slot + kSlotHeaderSize, payload);  // W3
-  atomics::store_release(header.seq_word, committed_word(seq));   // W4
+  atomics::store_words_relaxed(slot + kSlotHeaderSize, payload.first(half));
+  REVENANT_FAULT_POINT(kMidPayload);  // F2
+  atomics::store_words_relaxed(slot + kSlotHeaderSize + half, payload.subspan(half));
+  REVENANT_FAULT_POINT(kBeforeCommit);                           // F3
+  atomics::store_release(header.seq_word, committed_word(seq));  // W4
 }
 
 /// Default for read_slot's test seam: does nothing and compiles away.

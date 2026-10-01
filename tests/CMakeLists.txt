@@ -42,6 +42,8 @@ revenant_add_test_suite(revenant_integration_tests integration integration/test_
                         integration/test_subscriber.cpp)
 if(REVENANT_FAULT_INJECTION)
   target_sources(revenant_integration_tests PRIVATE integration/test_fault.cpp)
+  # Real SIGKILLs at fault points; needs fork, so it is excluded from tsan.
+  revenant_add_test_suite(revenant_crash_tests crash crash/crash_kill_points.cpp)
 endif()
 
 # Message count scales with REVENANT_STRESS_MESSAGES (default 10^6).

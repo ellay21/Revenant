@@ -146,7 +146,34 @@ Each publish ends with **W5**, `head ← s` (release). This lets a subscriber at
 
 The hot path pays for neither. Detection latency is bounded by the probe interval plus the caller's polling period, and there are no false positives: a held lease means a live publisher.
 
-## 9. What the tests do and do not prove
+## 9. Failure semantics
+
+The crash suite ([`tests/crash/crash_kill_points.cpp`](../tests/crash/crash_kill_points.cpp)) forks a publisher and kills it with a real `SIGKILL` on the Nth hit of each fault point. N covers the first message, the second, the last slot of the first lap, the first of the second lap, and the third lap. The kernel then cleans up exactly as it would after an OOM kill. Fault points exist only in test builds; the release library contains none.
+
+| Point | Publisher killed… | Subscriber observes | Next publisher |
+|---|---|---|---|
+| **F1** after W1 | slot marked "being written" | an exact prefix up to message `n − 1`, then `PublisherDead`; never a torn read | resumes at `n`; message `n` was never delivered, so there is no duplicate |
+| **F2** mid-payload | half the payload written | same as F1 | same as F1 |
+| **F3** before W4 | payload complete, not committed | same as F1 | same as F1 |
+| **F4** after W4 | committed, `head` stale | message `n` normally: readers trust the slot word, not `head` | rolls `head` forward to `n` (INV3), resumes at `n + 1` |
+| **F5** after W5 | message complete | everything up to `n` | resumes at `n + 1` |
+| **F6** during recovery | lease held, epoch not bumped | `PublisherDead`; nothing new was written | recovers identically: recovery is idempotent |
+| **F7** during initialisation | `magic` not yet published | `attach` fails with `segment_incomplete` (retryable) | re-initialises the abandoned segment |
+
+In every publish-path case the subscriber then receives `EpochChange{2}`, followed by the next sequence. Each test asserts the exact sequence the next publisher resumes at, and checks every byte of every delivered message.
+
+| Other event | Effect |
+|---|---|
+| A subscriber is killed | None. Nothing waits for subscribers, and they map the segment read-only. |
+| N hot standbys are waiting | The kernel grants the lease to exactly one per death. |
+| The publisher is a zombie | Its lease is already released, because descriptors close before the zombie state. |
+| The publisher is `SIGSTOP`ped | Subscribers see `kEmpty`: it is alive and holds the lease. A heartbeat for stalls is a non-goal. |
+| The publisher forks without `exec`, then dies | The child shares the open file description, so the lease lives on until the child exits. |
+| A segment from another build, or a hostile one | `layout_mismatch`, `version_mismatch`, `bad_magic` or `segment_corrupt`; never a crash or an out-of-bounds read. |
+
+**Mutation check.** Disabling the INV3 roll-forward makes all five F4 cases fail.
+
+## 10. What the tests do and do not prove
 
 - **Single-threaded unit tests prove the protocol's decisions.** A test seam runs between the copy and the re-check and rewrites the slot "during" the read, so torn reads are exercised deterministically. Mutation checks confirm the tests fail if the re-check is removed.
 - **x86-64 never reorders a store with an older store,** so a missing `release` can pass every x86 test. The arm64 CI job and ThreadSanitizer reduce that risk; they do not eliminate it. Exhaustive weak-memory checking (herd7, GenMC) is future work.

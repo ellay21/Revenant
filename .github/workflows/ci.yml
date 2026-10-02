@@ -57,6 +57,19 @@ jobs:
       - name: No shared-memory segments left behind
         run: "! ls /dev/shm | grep '^revenant\\.'"
 
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+      - run: cmake --preset bench
+      - run: cmake --build --preset bench
+      - name: Smoke run (shared runners are too noisy for published numbers)
+        run: |
+          build/bench/bench/bench_latency_pingpong --iterations=10000
+          build/bench/bench/bench_fanout --messages=10000 --max-subscribers=2
+
   sanitizers:
     name: sanitizers (${{ matrix.preset }})
     runs-on: ubuntu-24.04

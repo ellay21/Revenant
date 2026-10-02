@@ -36,13 +36,24 @@
       "inherits": "dev",
       "displayName": "Debug + ThreadSanitizer",
       "cacheVariables": { "REVENANT_SANITIZER": "thread" }
+    },
+    {
+      "name": "bench",
+      "inherits": "base",
+      "displayName": "Release benchmarks, no tests, no fault injection",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "REVENANT_BUILD_TESTS": "OFF",
+        "REVENANT_BUILD_BENCH": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "dev", "configurePreset": "dev" },
     { "name": "release", "configurePreset": "release" },
     { "name": "asan", "configurePreset": "asan" },
-    { "name": "tsan", "configurePreset": "tsan" }
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "bench", "configurePreset": "bench" }
   ],
   "testPresets": [
     {

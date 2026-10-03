@@ -69,6 +69,7 @@ jobs:
         run: |
           build/bench/bench/bench_latency_pingpong --iterations=10000
           build/bench/bench/bench_fanout --messages=10000 --max-subscribers=2
+          build/bench/bench/bench_recovery --iterations=20
 
   sanitizers:
     name: sanitizers (${{ matrix.preset }})

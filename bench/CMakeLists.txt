@@ -8,3 +8,4 @@ endfunction()
 
 revenant_add_bench(bench_latency_pingpong latency_pingpong.cpp)
 revenant_add_bench(bench_fanout fanout.cpp)
+revenant_add_bench(bench_recovery recovery.cpp)

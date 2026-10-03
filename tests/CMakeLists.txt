@@ -38,8 +38,8 @@ target_compile_definitions(revenant_unit_tests
 
 # Real /dev/shm, real file descriptors, forked children.
 revenant_add_test_suite(revenant_integration_tests integration integration/test_lease.cpp
-                        integration/test_publisher.cpp integration/test_shm_segment.cpp
-                        integration/test_subscriber.cpp)
+                        integration/test_inspect.cpp integration/test_publisher.cpp
+                        integration/test_shm_segment.cpp integration/test_subscriber.cpp)
 if(REVENANT_FAULT_INJECTION)
   target_sources(revenant_integration_tests PRIVATE integration/test_fault.cpp)
   # Real SIGKILLs at fault points; needs fork, so it is excluded from tsan.
@@ -50,3 +50,11 @@ endif()
 # Message count scales with REVENANT_STRESS_MESSAGES (default 10^6).
 revenant_add_test_suite(revenant_stress_tests stress stress/stress_channel.cpp
                         stress/stress_seqlock.cpp)
+
+if(TARGET revenant-stat)
+  add_test(NAME RevenantStat.ListExitsCleanly COMMAND revenant-stat --list)
+  add_test(NAME RevenantStat.MissingChannelExitsWithTwo COMMAND revenant-stat no_such_channel_x)
+  set_tests_properties(RevenantStat.ListExitsCleanly PROPERTIES LABELS integration)
+  set_tests_properties(RevenantStat.MissingChannelExitsWithTwo
+                       PROPERTIES LABELS integration WILL_FAIL TRUE)
+endif()

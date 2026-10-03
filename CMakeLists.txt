@@ -15,15 +15,16 @@ option(REVENANT_BUILD_TESTS "Build the test suites" ${PROJECT_IS_TOP_LEVEL})
 option(REVENANT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ${PROJECT_IS_TOP_LEVEL})
 option(REVENANT_FAULT_INJECTION "Compile fault-injection points for the crash suite" OFF)
 option(REVENANT_BUILD_BENCH "Build the benchmarks" OFF)
+option(REVENANT_BUILD_TOOLS "Build revenant-stat" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 
-add_library(revenant STATIC src/config.cpp src/errors.cpp src/channel/publisher.cpp
-                            src/channel/subscriber.cpp src/platform/lease.cpp
-                            src/platform/shm_segment.cpp)
+add_library(revenant STATIC src/config.cpp src/errors.cpp src/channel/inspect.cpp
+                            src/channel/publisher.cpp src/channel/subscriber.cpp
+                            src/platform/lease.cpp src/platform/shm_segment.cpp)
 add_library(revenant::revenant ALIAS revenant)
 target_include_directories(revenant PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>)
 target_compile_features(revenant PUBLIC cxx_std_20)
@@ -34,6 +35,12 @@ revenant_set_warnings(revenant)
 if(REVENANT_FAULT_INJECTION)
   target_sources(revenant PRIVATE src/fault.cpp)
   target_compile_definitions(revenant PUBLIC REVENANT_FAULT_INJECTION=1)
+endif()
+
+if(REVENANT_BUILD_TOOLS)
+  add_executable(revenant-stat tools/revenant-stat/main.cpp)
+  target_link_libraries(revenant-stat PRIVATE revenant::revenant)
+  revenant_set_warnings(revenant-stat)
 endif()
 
 if(REVENANT_BUILD_TESTS)

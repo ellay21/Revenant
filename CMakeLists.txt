@@ -16,6 +16,7 @@ option(REVENANT_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ${PROJECT
 option(REVENANT_FAULT_INJECTION "Compile fault-injection points for the crash suite" OFF)
 option(REVENANT_BUILD_BENCH "Build the benchmarks" OFF)
 option(REVENANT_BUILD_TOOLS "Build revenant-stat" ${PROJECT_IS_TOP_LEVEL})
+option(REVENANT_BUILD_EXAMPLES "Build the examples" ${PROJECT_IS_TOP_LEVEL})
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
@@ -41,6 +42,10 @@ if(REVENANT_BUILD_TOOLS)
   add_executable(revenant-stat tools/revenant-stat/main.cpp)
   target_link_libraries(revenant-stat PRIVATE revenant::revenant)
   revenant_set_warnings(revenant-stat)
+endif()
+
+if(REVENANT_BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
 
 if(REVENANT_BUILD_TESTS)

@@ -14,4 +14,4 @@ if grep -rn 'memory_order' include src | grep -v '^include/revenant/core/atomics
 fi
 
 # Anchored at the repo root so fetched dependencies under build/_deps are never analysed.
-"$runner" -quiet -p "$build_dir" "^$PWD/(src|tests|tools)/"
+"$runner" -quiet -p "$build_dir" "^$PWD/(src|tests|tools|examples)/"

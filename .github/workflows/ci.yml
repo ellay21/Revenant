@@ -57,6 +57,17 @@ jobs:
       - name: No shared-memory segments left behind
         run: "! ls /dev/shm | grep '^revenant\\.'"
 
+  examples:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+      - run: cmake --preset release
+      - run: cmake --build --preset release --target ticker_publisher ticker_subscriber revenant-stat
+      - name: kill -9 the publisher; the standby must take over with no gap
+        run: examples/kill_demo.sh build/release
+
   bench:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

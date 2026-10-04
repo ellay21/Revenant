@@ -60,9 +60,9 @@ Each field owns its own line, so a store to one never invalidates the line holdi
 
 ## Initialisation
 
-Only the lease holder initialises a segment, and only while `magic == 0` (a fresh file, or one whose creator died mid-initialisation). It zeroes every byte after `magic`, writes the header fields, and then stores `magic = kMagic` with **release** ordering. A reader that loads `magic` with **acquire** ordering and sees `kMagic` therefore also sees the complete header and a zeroed control block and ring.
+Only the lease holder initialises a segment, and only when validation reports it incomplete: `magic == 0`, or a file shorter than one header. Either way its creator died mid-initialisation. The publisher resizes the file to its exact size without ever truncating through zero, because a waiting subscriber may already have it mapped. It then zeroes every byte after `magic`, writes the header fields, and finally stores `magic = kMagic` with **release** ordering. A reader that loads `magic` with **acquire** ordering and sees `kMagic` therefore also sees the complete header and a zeroed control block and ring.
 
-`magic` itself is never touched by a plain store, because subscribers may be polling it during initialisation.
+`magic` itself is only ever written atomically, because subscribers may be polling it during initialisation. Leftover bytes are cleared with a relaxed atomic store before the final release.
 
 ## `layout_hash`
 
